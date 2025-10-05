@@ -1,0 +1,58 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: testuser
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U testuser -d testdb"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Postgres client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Wait for Postgres to be healthy
+        run: |
+          for i in {1..30}; do
+            pg_isready -h localhost -p 5432 -U testuser -d testdb && break
+            sleep 2
+          done
+
+      - name: Prepare database schema
+        env:
+          PGPASSWORD: testpass
+        run: |
+          psql "postgresql://testuser@localhost:5432/testdb" -f scripts/init_db.sql
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Run tests (Vitest)
+        env:
+          DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb
+        run: npm run test
